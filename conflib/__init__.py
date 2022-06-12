@@ -12,6 +12,7 @@ from .common import (
     BuilderAppDirs,
     UserDirs,
     AppDirs,
+    ByteSize,
 )
 
 from .apps import (
@@ -19,6 +20,8 @@ from .apps import (
     PackageTarGz,
     PackageWinExe,
 )
+
+from .downloader import download
 
 from .version import (
     __version__,

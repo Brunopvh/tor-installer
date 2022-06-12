@@ -25,6 +25,7 @@ from conflib import (
     get_abspath,
     get_user_home,
     mkdir,
+    download,
     File,
     FileReader,
     FileJson,
@@ -43,8 +44,8 @@ app_dirs: AppDirs = BuilderAppDirs().build_user_root(False).build_appname('tor-b
 
 
 class TorBrowserLinux(PackageTarGz):
-    def __init__(self, pkgname: str, pkgfile: str, save_dir: str, temp_dir: str) -> None:
-        super().__init__(pkgname, pkgfile, save_dir, temp_dir)
+    def __init__(self, pkgname: str, pkgfile: str, save_dir: str) -> None:
+        super().__init__(pkgname, pkgfile, save_dir)
         self.app_dirs_tor_browser: AppDirs = BuilderAppDirs().build_appname('torbrowser').build_user_root(False).build()
 
     def install(self):
@@ -68,9 +69,10 @@ class TorBrowserLinux(PackageTarGz):
         os.system('./start-tor-browser.desktop --register-app')
 
     def uninstall(self):
+        print(f'Desinstalando ... {self.pkgname}', end=' ')
         if os.path.exists(self.app_dirs_tor_browser.appdir()):
             shutil.rmtree(self.app_dirs_tor_browser.appdir())
-
+        print('OK')
 
 class TorBrowserWindows(PackageWinExe):
     def __init__(self, pkgname: str, pkgfile: str, save_dir: str) -> None:
@@ -81,9 +83,7 @@ class TorBrowserWindows(PackageWinExe):
 
 class BuilderTorBrowser(object):
     def __init__(self) -> None:
-        
         self._save_dir = app_dirs.app_cache_dir() 
-        self._temp_dir = user_dirs.temp_dir()
         self._pkgname = 'torbrowser'
 
         if KERNEL_TYPE == 'Linux':
@@ -106,7 +106,7 @@ class BuilderTorBrowser(object):
     def build(self) -> PackageApp:
         
         if KERNEL_TYPE == 'Linux':
-            tb: PackageTarGz = TorBrowserLinux(self._pkgname, self._pkgfile, self._save_dir, self._temp_dir)
+            tb: PackageTarGz = TorBrowserLinux(self._pkgname, self._pkgfile, self._save_dir)
         elif KERNEL_TYPE == 'Windows':
             tb: PackageWinExe = PackageWinExe(self._pkgname, self._pkgfile, self._save_dir)
         else:
@@ -116,8 +116,6 @@ class BuilderTorBrowser(object):
         tb.hash = self._hash
         tb.url = self._url
         return tb
-
-
 
 
 def main():
@@ -156,7 +154,8 @@ def main():
         print(f'FILE -> {tor.pkg_path().absolute()}')
     
         if not tor.pkg_path().exists():
-            wget.download(tor.url, tor.pkg_path().absolute())
+            #wget.download(tor.url, tor.pkg_path().absolute())
+            download(tor.url, tor.pkg_path().absolute())
 
         tor.install()
     elif args.uninstall_tor:

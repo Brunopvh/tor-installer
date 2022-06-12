@@ -60,9 +60,9 @@ class PackageApp(object):
 
 
 class PackageTarGz(PackageApp):
-    def __init__(self, pkgname: str, pkgfile: str, save_dir: str, temp_dir:str) -> None:
+    def __init__(self, pkgname: str, pkgfile: str, save_dir: str) -> None:
         super().__init__(pkgname, pkgfile, save_dir)
-        self.temp_dir = temp_dir # Diretório para descomprimir o pacote .tar
+        self.temp_dir = user_dirs.temp_dir() # Diretório para descomprimir o pacote .tar
 
     def unpack(self):
         print(f'Descompactando ... {self.pkgfile} em ... {self.temp_dir}', end=' ')
