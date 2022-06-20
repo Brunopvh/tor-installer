@@ -2,26 +2,28 @@
 
 from .common import (
     KERNEL_TYPE,
+    mkdir,
+    rmdir,
+    get_user_home,
+    get_abspath,
+    download_file,
+    get_terminal_width,
     File,
     FileReader,
     FileJson,
-    mkdir,
-    get_user_home,
-    get_abspath,
-    BuilderUserDirs,
-    BuilderAppDirs,
-    UserDirs,
-    AppDirs,
+    JSON,
     ByteSize,
-)
-
-from .apps import (
     PackageApp,
     PackageTarGz,
+    PackagePython3Zip,
+    PackagePython2Zip,
     PackageWinExe,
+    UserDirs,
+    AppDirs,
+    BuilderUserDirs,
+    BuilderAppDirs,
 )
 
-from .downloader import download
 
 from .version import (
     __version__,

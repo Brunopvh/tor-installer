@@ -2,18 +2,33 @@
 #
 
 
+import os
+import shutil
+import sys
+import hashlib
 import json
+import urllib.request
+from shutil import (unpack_archive, copyfile, rmtree)
 from pathlib import Path
 from platform import system
-from shutil import copyfile
-import os
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 
 
+try:
+	#from bs4 import BeautifulSoup
+	import requests
+	from requests import Response
+	import tqdm
+except Exception as e:
+	print(e)
+	sys.exit(1)
 
 KERNEL_TYPE = system()
 
 
+#=====================================================================#
+# Funções
+#=====================================================================#
 
 def get_user_home() -> str:
     return os.path.abspath(Path().home())
@@ -34,9 +49,24 @@ def mkdir(path: str) -> bool:
     else:
         return True
 
+def rmdir(path: str) -> bool:
+    if path is None:
+        return False
+
+    try:
+        shutil.rmtree(path)
+    except:
+        return False
+    else:
+        return True
+
 
 
 def _get_file_header(file: str) -> str:
+    """
+      Usa o módulo magic do python para obter o cabeçalho de um arquivo
+
+    """
     try:
         from magic import from_file
     except Exception as e:
@@ -51,6 +81,60 @@ def get_abspath(path: str) -> str:
     """Retorna o caminho absoluto de um arquivo ou diretório."""
     return os.path.abspath(path)
 
+
+#=========================================================================#
+# Downloader
+#=========================================================================#
+
+def get_terminal_width() -> int:
+	try:
+		width = int(os.get_terminal_size()[0])
+	except:
+		width = 80
+	return width
+
+def clean_line():
+	"""Limpar a linha do console"""
+	print(' ' * get_terminal_width(), end='\r')
+
+
+def download_file(url: str, output_file: str, verbose: bool=True) -> bool:
+	if os.path.isfile(output_file):
+		print(f'[PULANDO] ... {output_file}')
+		return True
+
+	if len(output_file) > 20:
+		show_filename = f'{output_file}[0:20]...'
+	else:
+		show_filename = output_file
+
+	req: Response = requests.get(url, stream=True)
+	#req = requests.get(url, stream=True)
+	
+	try:
+		file_size = int(req.headers['Content-Length'])
+	except:
+		file_size = int(0)
+
+
+	chunk = 1
+	chunk_size = 1024
+	num_bars = int(file_size / chunk_size)
+	clean_line()
+	# unit='KB'
+
+	try:
+		with open(output_file, 'wb') as fp:
+			for chunk in tqdm.tqdm(
+				req.iter_content(chunk_size=chunk_size), total=num_bars, unit='KB', desc=show_filename,leave=True # progressbar stays
+				):
+				fp.write(chunk)
+
+	except Exception as e:
+		print(e)
+		return False
+	else:
+		return True
 
 
 class ByteSize(int):
@@ -111,26 +195,6 @@ class ByteSize(int):
     def __rmul__(self, other):
         return self.__class__(super().__rmul__(other))
 
-class String(str):
-    def __init__(self, text) -> None:
-        super().__init__()
-        self.__text: str = text
-
-    def __repr__(self) -> str:
-        return super().__repr__(self.__text)
-
-    def __str__(self) -> str:
-        return str(self.__text)
-
-    def concat(self, new_text):
-        self.__text += new_text
-        
-    def to_string(self) -> str:
-        return str(self.__text)
-
-    def len(self) -> int:
-        return len(self.__text)
-
 
 class File(object):
     """
@@ -149,8 +213,8 @@ class File(object):
         self.path: Path = Path(self.file)
 
     def get_path(self) -> Path:
-        """Retorna uma instância de Path() para o arquivo atual"""
-        return self.path
+        """Retorna uma nova instância de Path() para o arquivo atual"""
+        return Path(self.absolute())
 
     def absolute(self) -> str:
         """Retorna o caminho absoluto de um arquivo"""
@@ -165,7 +229,7 @@ class File(object):
         Ex:
            /path/to/file_name.pdf
 
-        name() -> file_name
+        self.name() -> file_name
         """
         if self.extension() is None:
             return self.basename()
@@ -187,9 +251,6 @@ class File(object):
         """
         return os.path.basename(self.absolute())
 
-    def drive(self):
-        return self.path.drive
-
     def extension(self) -> str:
         """Retorna a extensão do arquivo baseado no nome"""
         _ext = os.path.splitext(self.absolute())[1]
@@ -208,9 +269,6 @@ class File(object):
            Retorna o cabeçalho de arquivo
         """
         return _get_file_header(self.absolute())
-
-    def touch(self) -> None:
-        self.path.touch()
 
     def delete(self) -> None:
         """Deleta o arquivo"""
@@ -476,12 +534,11 @@ class FileJson(File):
 
 
 
-
-
 class UserDirs(object):
     def __init__(self) -> None:
         self._temp_dir = None
         self._temp_file = None
+        self.user_root = False
 
     def temp_dir(self) -> str:
         if self._temp_dir is None:
@@ -512,16 +569,20 @@ class UserDirs(object):
         pass
 
 
-
-
-
 class UserDirsLinux(UserDirs):
-    def __init__(self, user_root: bool) -> None:
+    def __init__(self) -> None:
         super().__init__()
+        self.user_root = False
+        
+    @property
+    def user_root(self) -> bool:
+        return self._user_root
 
-        self.user_root = user_root
+    @user_root.setter
+    def user_root(self, new_user_root: bool):
+        self._user_root = new_user_root
         if os.geteuid() == 0:
-            self.user_root = True
+            self._user_root = True
 
     def config_dir(self) -> str:
         if not self.user_root:
@@ -599,49 +660,16 @@ class UserDirsWindows(UserDirs):
         pass
 
 
-
-
-
-#================================================================================#
-# Padrão de projeto Builder para criar instâncias de UserDirs em sistemas Linux e Windows
-# user_dirs = BuilderUserDirs().get_user_root(True/False).build()
-#================================================================================#
-class BuilderUserDirs(object):
-    def __init__(self) -> None:
-        """
-           https://github.com/kelvins/design-patterns-python
-
-        """
-        self._user_root = False
-
-    def build_user_root(self, user_root: bool = False):
-        if os.name == 'nt':
-            self._user_root = False
-        elif os.name == 'posix' and os.geteuid() == 0:
-            self._user_root = True
-        else:
-            self._user_root = user_root
-        return self
-        
-    def build(self) -> UserDirs:
-        
-        if KERNEL_TYPE == 'Linux':
-            return UserDirsLinux(self._user_root)
-        elif KERNEL_TYPE == 'Windows':
-            return UserDirsWindows()
-        else:
-            return UserDirs()
-
-
 #================================================================================#
 # AppDirs
 #================================================================================#
 
 class AppDirs(object):
-    def __init__(self, appname: str, author: str) -> None:
+    def __init__(self, appname: str) -> None:
         self.appname: str = appname
-        self.author: str = author
-        self.user_dirs: UserDirs = BuilderUserDirs().build_user_root(False).build()
+        self.author: str = None
+        self.user_root: bool = False
+        self.user_dirs: UserDirs = UserDirs()
 
     @property
     def appname(self) -> str:
@@ -670,8 +698,11 @@ class AppDirs(object):
     def app_file_conf(self) -> str:
         pass
 
-    def app_json_conf(self) -> str:
-        _file = os.path.join(self.app_config_dir(), f'{self.appname}.json')
+    def app_json_conf(self, filejson: str) -> FileJson:
+        """
+           Retorna uma instância de FileJson para o arquivo filejson.json
+        """
+        _file = os.path.join(self.app_config_dir(), filejson)
         return FileJson(_file)
 
     def app_script(self) -> str:
@@ -691,11 +722,25 @@ class AppDirs(object):
 
 
 class AppDirsLinux(AppDirs):
-    def __init__(self, appname: str, author: str, user_root:bool) -> None:
-        super().__init__(appname, author)
-        self.user_root = user_root
-        self.user_dirs: UserDirsLinux = BuilderUserDirs().build_user_root(self.user_root).build()
+    def __init__(self, appname: str) -> None:
+        super().__init__(appname)
+        self.user_dirs: UserDirsLinux = UserDirsLinux()
+        self.user_dirs.user_root = self.user_root
         
+    @property
+    def user_root(self) -> bool:
+        return self._user_root
+
+    @user_root.setter
+    def user_root(self, new_user_root: bool):
+        self._user_root = new_user_root
+        
+        if os.geteuid() == 0:
+            self._user_root = True
+        
+        self.user_dirs: UserDirsLinux = UserDirsLinux()
+        self.user_dirs.user_root = self._user_root
+
     @property
     def appname(self) -> str:
         return self._appname
@@ -722,10 +767,6 @@ class AppDirsLinux(AppDirs):
 
     def app_file_conf(self) -> str:
         return os.path.join(self.app_config_dir(), f'{self.appname}.conf')
-
-    def app_json_conf(self) -> FileJson:
-        _file = os.path.join(self.app_config_dir(), f'{self.appname}.json')
-        return FileJson(_file)
 
     def app_script(self) -> str:
         return get_abspath(os.path.join(self.user_dirs.binary_dir(), self.appname))
@@ -755,10 +796,10 @@ class AppDirsLinux(AppDirs):
         pass
 
 
-
 class AppDirsWindows(AppDirs):
-    def __init__(self, appname: str, author: str) -> None:
-        super().__init__(appname, author)
+    def __init__(self, appname: str) -> None:
+        super().__init__(appname)
+        self.user_dirs: UserDirsWindows = UserDirsWindows()
 
     @property
     def appname(self) -> str:
@@ -804,6 +845,34 @@ class AppDirsWindows(AppDirs):
         pass
 
 
+
+class BuilderUserDirs(object):
+    def __init__(self) -> None:
+        """
+           https://github.com/kelvins/design-patterns-python
+
+        """
+        self._user_root = False
+
+    def build_user_root(self, user_root: bool):
+        if os.name == 'nt':
+            self._user_root = False
+        elif os.name == 'posix' and os.geteuid() == 0:
+            self._user_root = True
+        else:
+            self._user_root = user_root
+        return self
+
+    def build(self) -> UserDirs:
+        if KERNEL_TYPE == 'Linux':
+            user_dirs: UserDirsLinux = UserDirsLinux()
+        elif KERNEL_TYPE == 'Windows':
+            user_dirs: UserDirsWindows = UserDirsWindows()
+
+        user_dirs.user_root = self._user_root
+        return user_dirs
+
+
 class BuilderAppDirs(object):
     def __init__(self) -> None:
         """
@@ -813,7 +882,7 @@ class BuilderAppDirs(object):
         self._appname = None
         self._author = None
         self._user_root = False
-        
+
     def build_author(self, author: str):
         self._author = author
         return self
@@ -822,7 +891,7 @@ class BuilderAppDirs(object):
         self._appname = appname
         return self
 
-    def build_user_root(self, user_root: bool = False):
+    def build_user_root(self, user_root: bool):
         if os.name != 'posix':
             return self
         if os.geteuid() == 0:
@@ -830,26 +899,248 @@ class BuilderAppDirs(object):
         else:
             self._user_root = user_root
         return self
-        
+
     def build(self) -> AppDirs:
         if self._appname is None:
-            raise Exception(f'{__class__.__name__} appname não pode ser None')            
+            raise Exception(f'{__class__.__name__} appname não pode ser None')
 
         if KERNEL_TYPE == 'Linux':
-            return AppDirsLinux(self._appname, self._author, self._user_root)
-        elif KERNEL_TYPE == 'Windows':           
-            return AppDirsWindows(self._appname, self._author)
+            app_dirs: AppDirsLinux = AppDirsLinux(self._appname)
+        elif KERNEL_TYPE == 'Windows':
+            app_dirs: AppDirsWindows = AppDirsWindows(self._appname)
         else:
-            return AppDirs(self._appname, self._author)
+            app_dirs: AppDirs = AppDirs(self._appname)
+
+        app_dirs.user_root = self._user_root
+        app_dirs.author = self._author
+        return app_dirs
 
 
+class PackageApp(object):
+    def __init__(self, appname: str, appfile: str, save_dir: str) -> None:
+        super().__init__()
+        self.app_dirs: AppDirs = BuilderAppDirs().build_appname(appname).build_user_root(False).build()
+
+        self.appfile: str = appfile
+        self.version: str = None
+        self.save_dir: str = save_dir # Diretório onde o pacote deve ser baixado.
+        self.url = None
+        self.hash = None
+
+    @property
+    def hash(self):
+        return self._hash
+
+    @hash.setter
+    def hash(self, new_hash):
+        self._hash = new_hash
+
+    @property
+    def url(self):
+        return self._url
+
+    @url.setter
+    def url(self, new_url):
+        self._url = new_url
+
+    def verify(self) -> bool:
+        """
+            Verifica a integridade do pacote
+        """
+        if self.hash is None:
+            print(f'ERRO ... {__class__.__name__} sha256 não pode ser None')
+            return False
+        #print(f'[CHECANDO] ... {self.pkg_file().absolute()}')
+        return ShaSum(self.pkg_file().absolute()).check_sha256(self.hash)
+
+    def pkg_file(self) -> File:
+        pass
+
+    def install(self):
+        pass
+
+    def uninstall(self):
+        pass
+
+    def download(self):
+        return download_file(self.url, self.pkg_file().absolute())
+
+
+class PackageTarGz(PackageApp):
+    def __init__(self, appname: str, appfile: str, save_dir: str) -> None:
+        super().__init__(appname, appfile, save_dir)
+
+        # Nome do diretório após a descompressão do pacote tar.gz
+        self.dir_package_files: str = None
+
+    def unpack(self):
+        print(f'Descompactando ... {self.appfile} em ... {self.app_dirs.get_temp_dir()}', end=' ')
+        mkdir(self.app_dirs.get_temp_dir())
+        sys.stdout.flush()
+        unpack_archive(self.pkg_file().absolute(), extract_dir=self.app_dirs.get_temp_dir(), format='tar')
+        print('OK')
+
+    def pkg_file(self) -> File:
+        return File(os.path.join(self.save_dir, self.appfile))
+
+
+class PackagePython3Zip(PackageApp):
+    def __init__(self, appname: str, appfile: str, save_dir: str, project_dir: str) -> None:
+        super().__init__(appname, appfile, save_dir)
+        self.project_dir = project_dir
+
+    def pkg_file(self) -> File:
+        return File(os.path.join(self.save_dir, self.appfile))
+
+    def unpack(self):
+        print(f'Descompactando ... {self.appfile} em ... {self.app_dirs.get_temp_dir()}', end=' ')
+        mkdir(self.app_dirs.get_temp_dir())
+        sys.stdout.flush()
+        unpack_archive(self.pkg_file().absolute(), extract_dir=self.app_dirs.get_temp_dir(), format='zip')
+        print('OK')
+
+    def install(self):
+        self.unpack()
+        os.chdir(self.app_dirs.get_temp_dir())
+        os.chdir(self.project_dir)
+        os.system(f'{sys.executable} setup.py install')
+        rmtree(self.app_dirs.get_temp_dir())
+
+    
+
+class PackagePython2Zip(PackageApp):
+    def __init__(self, appname: str, appfile: str, save_dir: str, project_dir: str) -> None:
+        super().__init__(appname, appfile, save_dir)
+        self.project_dir = project_dir
+        self.path_python2: str = None
+
+    def pkg_file(self) -> File:
+        return File(os.path.join(self.save_dir, self.appfile))
+
+    def unpack(self):
+        print(f'Descompactando ... {self.appfile} em ... {self.app_dirs.get_temp_dir()}', end=' ')
+        mkdir(self.app_dirs.get_temp_dir())
+        sys.stdout.flush()
+        unpack_archive(self.pkg_file().absolute(), extract_dir=self.app_dirs.get_temp_dir(), format='zip')
+        print('OK')
+
+    def install(self):
+        self.unpack()
+        os.chdir(self.app_dirs.get_temp_dir())
+        os.chdir(self.project_dir)
+        os.system(f'{self.path_python2} setup.py install')
+        #rmtree(self.app_dir.get_temp_dir())
+
+
+class PackageWinExe(PackageApp):
+    def __init__(self, appname: str, appfile: str, save_dir: str) -> None:
+        super().__init__(appname, appfile, save_dir)
+
+    def pkg_file(self) -> File:
+        return File(os.path.join(self.save_dir, self.appfile))
+
+    def install(self):
+        os.system(self.pkg_file().absolute())
+
+
+
+class ShaSum(object):
+    def __init__(self, data) -> None:
+        super().__init__()
+        self.data = data # data = arquivo/string/bytes
+        self.__bytes = None
+
+    def _get_bytes(self) -> bytes:
+        """
+        converte self.data para bytes e retorna bytes.
+        """
+        if self.__bytes is not None:
+            return self.__bytes
+
+        if isinstance(self.data, bytes):
+            return self.data
+
+        if isinstance(self.data, str):
+            # Verificar se data é um texto ou um arquivo.
+
+            if os.path.isfile(self.data):
+                try:
+                    with open(self.data, 'rb') as file:
+                        self.__bytes = file.read()
+                except Exception as e:
+                    print(e)
+            else:
+                self.__bytes = str.encode(self.data)
+            return self.__bytes
+
+    def check_md5(self, md5_string: str) -> bool:
+        if len(md5_string) != 32:
+            print(f'{__class__.__name__} ERRO hash do tipo md5 deve ter 32 caracteres.')
+            return False
+
+        if self.getmd5() == md5_string:
+            return True
+
+        print(f'{__class__.__name__} FALHA')
+        return False
+
+    def check_sha1(self, sha1_string: str) -> bool:
+        if len(sha1_string) != 40:
+            print(f'{__class__.__name__} ERRO hash do tipo sha1 deve ter 40 caracteres.')
+            return False
+
+        if self.getsha1() == sha1_string:
+            return True
+
+        print(f'{__class__.__name__} FALHA')
+        return False
+
+    def check_sha256(self, sha256_string: str) -> bool:
+        if len(sha256_string) != 64:
+            print(f'{__class__.__name__} ERRO hash do tipo sha256 deve ter 64 caracteres.')
+            return False
+
+        if self.getsha256() == sha256_string:
+            return True
+
+        print(f'{__class__.__name__} FALHA')
+        return False
+
+    def check_sha512(self, sha512_string: str) -> bool:
+        if len(sha512_string) != 128:
+            print(f'{__class__.__name__} ERRO hash do tipo sha512 deve ter 128 caracteres.')
+            return False
+
+        if self.getsha512() == sha512_string:
+            return True
+
+        print(f'{__class__.__name__} FALHA')
+        return False
+
+
+    def getmd5(self) -> str:
+        if self._get_bytes() is None:
+            return None
+        return hashlib.md5(self._get_bytes()).hexdigest()
+
+    def getsha1(self) -> str:
+        if self._get_bytes() is None:
+            return None
+        return hashlib.sha1(self._get_bytes()).hexdigest()
+
+    def getsha256(self) -> str:
+        if self._get_bytes() is None:
+            return None
+        return hashlib.sha256(self._get_bytes()).hexdigest()
+
+    def getsha512(self) -> str:
+        if self._get_bytes() is None:
+            return None
+        return hashlib.sha512(self._get_bytes()).hexdigest()
 
 
 def main():
-    # app: AppDirsAbstract = BuilderAppDirs().build_user_root().build_appname('TesteApp').build_author('BrunoChaves').build()
     pass
     
-
-
 if __name__ == '__main__':
     main()
